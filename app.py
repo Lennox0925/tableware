@@ -6,7 +6,6 @@ from datetime import datetime
 import plotly.express as px
 
 # --- 核心配置 ---
-# 請在此處貼上您的 GAS Web App URL，或使用 st.secrets["GAS_URL"]
 GAS_URL = "https://script.google.com/macros/s/AKfycbxhvUl-BHXp3daZzbEVp3k27QBBfqU_qy_W3QNwtXBuPdeYHnuknBZKedEw486hrcPUbg/exec"
 
 st.set_page_config(layout="wide", page_title="餐具雲端盤點系統", page_icon="🍴")
@@ -14,179 +13,145 @@ st.set_page_config(layout="wide", page_title="餐具雲端盤點系統", page_ic
 # --- 平板介面 CSS 優化 ---
 st.markdown("""
     <style>
-    .stButton>button { width: 100%; height: 70px; font-size: 1.2rem; border-radius: 12px; font-weight: bold; }
-    .stNumberInput input { font-size: 1.5rem !important; text-align: center; }
-    [data-testid="stSidebar"] { background-color: #1e272e; color: white; min-width: 260px; }
-    .main { background-color: #f1f2f6; }
-    div[data-baseweb="select"] > div { font-size: 1.2rem; }
-    /* 加大表格字體 */
-    .stDataFrame { font-size: 1.1rem; }
+    /* 左側選單顏色修正 */
+    [data-testid="stSidebar"] {
+        background-color: #262730 !important;
+        color: #FFFFFF !important;
+    }
+    [data-testid="stSidebar"] .stMarkdown, [data-testid="stSidebar"] label {
+        color: #FFFFFF !important;
+    }
+    /* 按鈕樣式 */
+    .stButton>button {
+        width: 100%;
+        height: 60px;
+        font-size: 1.1rem;
+        border-radius: 10px;
+        font-weight: bold;
+    }
+    /* 選中狀態的按鈕模擬樣式可透過顏色區分 (這裡使用 st.columns 建立矩陣) */
+    .stNumberInput input { font-size: 1.8rem !important; text-align: center; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 側邊欄：左框架導覽 ---
+# --- 側邊欄：左框架 ---
 with st.sidebar:
-    st.title("店鋪餐具管理")
-    st.info(f"📅 系統日期：{datetime.now().strftime('%Y-%m-%d')}")
+    st.title("🍴 餐具管理系統")
+    st.write(f"📅 {datetime.now().strftime('%Y-%m-%d')}")
     st.divider()
     
-    menu = st.radio(
-        "功能選單", 
-        ["1. 餐具清單上下載更新", "2. 餐具盤點與破損登記", "3. 數據分析看板"],
-        index=0
-    )
+    # 功能導覽
+    menu = st.radio("功能導覽", ["1. 清單初始化", "2. 破損/盤點登記", "3. 數據分析看板"])
     
     st.divider()
-    # 同步功能：將本機暫存上傳至雲端 GAS
     if st.button("🚀 同步暫存至雲端"):
         if 'damage_buffer' in st.session_state and st.session_state.damage_buffer:
             try:
                 payload = {"action": "sync_damage", "data": st.session_state.damage_buffer}
                 res = requests.post(GAS_URL, json=payload)
                 if res.status_code == 200:
-                    st.success(f"同步完畢！雲端已紀錄。")
-                    st.session_state.damage_buffer = [] # 清空暫存
+                    st.success("同步成功！")
+                    st.session_state.damage_buffer = []
                     st.rerun()
-                else:
-                    st.error("同步失敗，請檢查網路連線")
             except Exception as e:
-                st.error(f"連線錯誤: {e}")
+                st.error(f"錯誤: {e}")
         else:
-            st.info("目前無待同步的資料")
+            st.info("無待同步資料")
 
-# --- 右框架：功能內容 ---
+# --- 右框架內容 ---
 
-# 功能 1：餐具清單上下載更新 (Master 檔初始化)
-if menu == "1. 餐具清單上下載更新":
-    st.header("📋 餐具清單初始化")
-    st.write("請上傳 CSV 檔，包含欄位：**餐具品項、單位、安全庫存量、店鋪使用量**")
-    
-    file = st.file_uploader("選擇餐具清單 CSV", type="csv")
+if menu == "1. 清單初始化":
+    st.header("📋 上傳餐具清單")
+    file = st.file_uploader("選擇 CSV 檔案", type="csv")
     if file:
         try:
-            # 處理編碼問題與指標重置
             file.seek(0)
-            df_master = pd.read_csv(file, encoding='utf-8-sig')
-        except Exception:
+            df = pd.read_csv(file, encoding='utf-8-sig')
+        except:
             file.seek(0)
-            df_master = pd.read_csv(file, encoding='big5')
-            
-        st.subheader("預覽清單內容")
-        st.dataframe(df_master, use_container_width=True, hide_index=True)
+            df = pd.read_csv(file, encoding='big5')
         
-        if st.button("🚀 確認上傳並更新雲端"):
-            # 轉換為 GAS 接受的二維陣列格式
-            data_list = [df_master.columns.tolist()] + df_master.values.tolist()
-            payload = {"action": "update_master_list", "data": data_list}
-            try:
-                res = requests.post(GAS_URL, json=payload)
-                st.success(f"✅ 雲端回應: {res.text}")
-            except Exception as e:
-                st.error(f"上傳失敗: {e}")
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        if st.button("💾 確認上傳至雲端"):
+            data_list = [df.columns.tolist()] + df.values.tolist()
+            requests.post(GAS_URL, json={"action": "update_master_list", "data": data_list})
+            st.success("雲端 Master 已更新")
 
-# 功能 2：餐具盤點與破損登記
-elif menu == "2. 餐具盤點與破損登記":
-    st.header("📝 每日紀錄與月度盤點")
+elif menu == "2. 破損/盤點登記":
+    st.header("📝 紀錄登記")
     
-    tab_damage, tab_inventory = st.tabs(["💔 破損登記 (本機暫存)", "📅 月度盤點提交"])
+    tab1, tab2 = st.tabs(["破損登記 (按鈕操作)", "月度盤點提交"])
     
-    # --- A. 破損登記 (本機暫存，支援平板輸入) ---
-    with tab_damage:
-        st.write("此處紀錄會先存於本機，需點擊左側「同步」才會傳至雲端。")
-        with st.form("damage_form", clear_on_submit=True):
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                d_item = st.text_input("餐具品項", placeholder="請輸入名稱")
-            with col2:
-                # 數量：無預設值，必須手動輸入
-                d_qty = st.number_input("破損數量", min_value=1, step=1, value=None)
-            with col3:
-                d_reason = st.selectbox("破損原因", ["(請選擇)", "洗滌損壞", "人員疏失", "客人打破", "自然耗損"], index=0)
-            
-            if st.form_submit_button("➕ 新增至暫存區"):
-                if d_item and d_qty is not None and d_reason != "(請選擇)":
-                    if 'damage_buffer' not in st.session_state:
-                        st.session_state.damage_buffer = []
-                    
-                    new_entry = {
-                        "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                        "item": d_item,
-                        "qty": int(d_qty),
-                        "reason": d_reason
-                    }
-                    st.session_state.damage_buffer.append(new_entry)
-                    st.toast(f"已暫存: {d_item} {d_qty}個")
-                else:
-                    st.error("請確認所有欄位已填寫 (數量不可為空)")
+    with tab1:
+        # --- 破損登記按鈕化 ---
+        # 定義品項 (實務上可從 Master List 讀取，這裡示範矩陣)
+        item_list = ["陶瓷平盤", "玻璃杯", "咖啡杯", "小碟子", "紅酒杯", "湯匙", "餐叉", "拉麵碗"]
+        reason_list = ["洗滌損壞", "人員疏失", "客人打破", "自然耗損", "其他原因"]
+
+        if 'sel_item' not in st.session_state: st.session_state.sel_item = None
+        if 'sel_reason' not in st.session_state: st.session_state.sel_reason = None
+
+        st.subheader("1. 選擇品項")
+        cols = st.columns(4) # 每列四個按鈕
+        for i, name in enumerate(item_list):
+            if cols[i % 4].button(name, key=f"btn_{name}"):
+                st.session_state.sel_item = name
+
+        st.subheader("2. 選擇原因")
+        cols_r = st.columns(4)
+        for i, rsn in enumerate(reason_list):
+            if cols_r[i % 4].button(rsn, key=f"rsn_{rsn}"):
+                st.session_state.sel_reason = rsn
+
+        # 顯示目前選擇
+        st.info(f"當前選擇：【{st.session_state.sel_item}】 | 原因：【{st.session_state.sel_reason}】")
+        
+        d_qty = st.number_input("3. 輸入數量 (整數)", min_value=1, step=1, value=None)
+
+        if st.button("➕ 新增至暫存紀錄", type="primary"):
+            if st.session_state.sel_item and st.session_state.sel_reason and d_qty:
+                if 'damage_buffer' not in st.session_state: st.session_state.damage_buffer = []
+                st.session_state.damage_buffer.append({
+                    "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "item": st.session_state.sel_item,
+                    "qty": int(d_qty),
+                    "reason": st.session_state.sel_reason
+                })
+                st.success("已暫存！")
+                st.session_state.sel_item = None # 重置
+                st.session_state.sel_reason = None
+            else:
+                st.warning("請確保 品項、原因、數量 皆已選擇/輸入")
 
         if 'damage_buffer' in st.session_state and st.session_state.damage_buffer:
-            st.write("📍 **本機待同步清單：**")
+            st.write("---")
+            st.write("📍 待同步清單：")
             st.table(pd.DataFrame(st.session_state.damage_buffer))
 
-    # --- B. 月度盤點提交 (產出按月分頁的 Sheet) ---
-    with tab_inventory:
-        curr_year = datetime.now().year
-        curr_month = datetime.now().month
-        st.subheader(f"📅 {curr_year} 年 {curr_month} 月 盤點試算")
-        st.caption("公式：上月盤點 + 進貨 - 當月盤點 = 當月破損量")
-        
-        # 建立盤點用動態表格
+    with tab2:
+        st.subheader("📅 月度盤點統計")
+        # 盤點表格
         inv_df = pd.DataFrame({
-            "盤點日期": [datetime.now().strftime("%Y-%m-%d")],
-            "餐具品項": [""],
-            "當月破損量": [0], # 這裡可由系統計算或手動填入
-            "盤點總數量": [None],
-            "店鋪使用量": [None],
+            "日期": [datetime.now().strftime("%Y-%m-%d")],
+            "品項": [""],
+            "盤點數量": [None],
             "進貨數量": [None],
-            "安全庫存量": [None]
+            "店鋪使用量": [None]
         })
-        
-        # 店鋪使用量在此表格中是可編輯的
-        edited_df = st.data_editor(inv_df, num_rows="dynamic", use_container_width=True, hide_index=True)
-        
-        if st.button(f"💾 提交至雲端 {curr_year} 年盤點檔案"):
-            # 轉換為 GAS 陣列格式
-            data_to_send = [edited_df.columns.tolist()] + edited_df.fillna("").values.tolist()
-            payload = {
-                "action": "submit_inventory", 
-                "year": curr_year,
-                "month": f"{curr_month}月",
-                "data": data_to_send
-            }
-            try:
-                res = requests.post(GAS_URL, json=payload)
-                st.success(f"✅ 盤點存檔成功: {res.text}")
-            except Exception as e:
-                st.error(f"連線失敗: {e}")
+        edited = st.data_editor(inv_df, num_rows="dynamic", use_container_width=True, hide_index=True)
+        if st.button("💾 提交盤點存檔"):
+            data = [edited.columns.tolist()] + edited.values.tolist()
+            requests.post(GAS_URL, json={"action": "submit_inventory", "data": data})
+            st.success("盤點已存入雲端年度檔案")
 
-# 功能 3：數據分析看板
 elif menu == "3. 數據分析看板":
-    st.header("📊 破損統計 Top 5")
-    
-    # 範例數據 (未來可串接 GAS 抓取當年紀錄檔進行真實分析)
-    mock_items = pd.DataFrame({
-        "品項": ["陶瓷圓盤", "玻璃杯", "咖啡勺", "紅酒杯", "小味碟"],
-        "數量": [15, 12, 8, 5, 4]
-    }).sort_values("數量", ascending=True)
-    
-    mock_reasons = pd.DataFrame({
-        "原因": ["洗滌損壞", "客損", "人員疏失", "自然耗損", "其他"],
-        "次數": [20, 15, 10, 5, 2]
-    })
+    st.header("📊 破損 Top 5 圖表")
+    # 範例資料
+    df_p = pd.DataFrame({"品項": ["玻璃杯", "平盤", "味碟", "咖啡杯", "碗"], "數量": [15, 12, 8, 5, 3]})
+    df_r = pd.DataFrame({"原因": ["洗滌", "客損", "疏失", "耗損"], "次數": [20, 10, 5, 2]})
 
-    col_left, col_right = st.columns(2)
-    
-    with col_left:
-        fig_item = px.bar(
-            mock_items, x='數量', y='品項', orientation='h', 
-            title="破損品項排名 Top 5", 
-            color='數量', color_continuous_scale='Reds'
-        )
-        st.plotly_chart(fig_item, use_container_width=True)
-        
-    with col_right:
-        fig_reason = px.pie(
-            mock_reasons, values='次數', names='原因', 
-            title="破損原因分布", hole=0.4
-        )
-        st.plotly_chart(fig_reason, use_container_width=True)
+    c1, c2 = st.columns(2)
+    with c1:
+        st.plotly_chart(px.bar(df_p, x='數量', y='品項', orientation='h', title="品項排行"), use_container_width=True)
+    with c2:
+        st.plotly_chart(px.pie(df_r, values='次數', names='原因', title="原因分布"), use_container_width=True)
