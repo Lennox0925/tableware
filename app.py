@@ -60,7 +60,11 @@ if menu == "1. 餐具清單上下載更新":
     
     file = st.file_uploader("選擇餐具清單 CSV", type="csv")
     if file:
-        df_master = pd.read_csv(file)
+        try:
+            df_master = pd.read_csv(file, encoding='utf-8-sig')
+        except UnicodeDecodeError:
+    # 如果 utf-8 失敗，嘗試繁體中文常用的 big5
+    df_master = pd.read_csv(file, encoding='big5')
         st.subheader("預覽清單內容")
         st.dataframe(df_master, use_container_width=True, hide_index=True)
         
