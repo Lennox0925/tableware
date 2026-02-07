@@ -97,57 +97,74 @@ elif menu == "💔 破損登記與同步":
 elif menu == "📅 月度盤點結算":
     st.header(f"📅 {datetime.now().month}月 盤點結算")
     
-    if st.button("🔄 讀取雲端清單基準"):
+    if st.button("🔄 1. 點擊讀取雲端清單基準"):
         with st.spinner('連線中...'):
             res = requests.post(GAS_URL, json={"action": "get_master_list"})
-            raw = res.json()
-            st.session_state.master_df = pd.DataFrame(raw[1:], columns=raw[0])
-            st.session_state.master_items = st.session_state.master_df['餐具品項'].tolist()
-            st.success("清單讀取成功！")
+            if res.status_code == 200:
+                raw = res.json()
+                # 修正點：明確拆分標題與內容
+                if len(raw) > 1:
+                    header = raw[0]
+                    body = raw[1:]
+                    st.session_state.master_df = pd.DataFrame(body, columns=header)
+                    st.session_state.master_items = st.session_state.master_df['餐具品項'].tolist()
+                    st.success(f"成功讀取 {len(st.session_state.master_items)} 筆品項！")
+                else:
+                    st.error("雲端清單是空的，請先至「清單管理」上傳。")
 
-    if st.session_state.master_items:
-        c1, c2 = st.columns()
+    if 'master_items' in st.session_state and st.session_state.master_items:
+        c1, c2 = st.columns([2, 1])
         with c1:
-            st.subheader("1. 選擇盤點品項")
+            st.subheader("2. 選擇盤點品項")
             cols = st.columns(4)
             for i, n in enumerate(st.session_state.master_items):
-                if cols[i % 4].button(n, key=f"inv_{n}"): st.session_state.sel_inv_item = n
+                if cols[i % 4].button(n, key=f"inv_{n}"): 
+                    st.session_state.sel_inv_item = n
             
             st.info(f"正在盤點：【{st.session_state.get('sel_inv_item', '未選擇')}】")
-            inv_qty = st.number_input("2. 輸入實盤總數量", min_value=0, step=1, value=None)
-            in_qty = st.number_input("3. 輸入本月進貨數", min_value=0, step=1, value=None)
+            # 數量輸入框：確保無預設值
+            inv_qty = st.number_input("3. 輸入「當月盤點總數量」", min_value=0, step=1, value=None)
+            in_qty = st.number_input("4. 輸入「進貨數量」", min_value=0, step=1, value=None)
             
             if st.button("➕ 加入盤點暫存"):
                 if st.session_state.get('sel_inv_item') and inv_qty is not None:
-                    st.session_state.inv_buffer.append({
+                    # 將暫存存入 buffer
+                    new_inv = {
                         "餐具品項": st.session_state.sel_inv_item,
                         "當月盤點總數量": int(inv_qty),
-                        "進貨數量": int(in_qty if in_qty else 0)
-                    })
+                        "進貨數量": int(in_qty if in_qty is not None else 0)
+                    }
+                    # 若重複選擇同一品項，則更新舊紀錄
+                    st.session_state.inv_buffer = [i for i in st.session_state.inv_buffer if i['餐具品項'] != st.session_state.sel_inv_item]
+                    st.session_state.inv_buffer.append(new_inv)
                     st.toast(f"{st.session_state.sel_inv_item} 已加入暫存")
-                else: st.warning("請選擇品項並輸入數量")
+                else: 
+                    st.warning("請選擇品項並輸入盤點數量")
 
         with c2:
             st.subheader("📦 盤點暫存清單")
             if st.session_state.inv_buffer:
-                temp_inv_df = pd.DataFrame(st.session_state.inv_buffer)
-                # 整合相同品項 (取最後一筆輸入)
-                final_inv = temp_inv_df.groupby("餐具品項").last().reset_index()
-                st.dataframe(final_inv, use_container_width=True)
+                temp_df = pd.DataFrame(st.session_state.inv_buffer)
+                st.dataframe(temp_df, use_container_width=True, hide_index=True)
                 
                 if st.button("🚀 整合並提交月報表", type="primary"):
-                    with st.spinner('整合數據中...'):
-                        # 合併 Master 清單與盤點數據
-                        report = st.session_state.master_df.merge(final_inv, on="餐具品項", how="left").fillna(0)
+                    with st.spinner('計算破損量並存檔中...'):
+                        # 合併清單與盤點暫存
+                        report = st.session_state.master_df.merge(temp_df, on="餐具品項", how="left").fillna(0)
                         report["盤點日期"] = datetime.now().strftime("%Y-%m-%d")
-                        # 自動計算破損量
-                        # 假設破損量計算 = (店鋪使用量 + 進貨) - 當月盤點 [此邏輯可視需求調整]
+                        
+                        # 公式：破損量 = (上月盤點[這裡暫用Master使用量代入] + 進貨) - 當月盤點
+                        # 註：店鋪使用量在您的需求中是固定的但可修改
                         report["當月破損量"] = (report["店鋪使用量"].astype(int) + report["進貨數量"].astype(int)) - report["當月盤點總數量"].astype(int)
+                        
+                        # 整理欄位順序符合您的要求
+                        report = report[["盤點日期", "餐具品項", "當月破損量", "當月盤點總數量", "店鋪使用量", "進貨數量", "安全庫存量"]]
                         
                         data_to_send = [report.columns.tolist()] + report.values.tolist()
                         res = requests.post(GAS_URL, json={"action": "submit_inventory", "data": data_to_send})
                         st.success(res.text)
-                        st.session_state.inv_buffer = []
+                        st.session_state.inv_buffer = [] # 提交後清空
+                        st.balloons()
 
 # --- 4. 看板 ---
 elif menu == "📊 數據看板":
